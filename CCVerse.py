@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[35]:
+# In[43]:
 
 
 from argparse import Namespace
@@ -12,39 +12,59 @@ from typing import Dict, List
 
 import numpy as np
 
+import pronouncing
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from torchnlp.word_to_vector import FastText
 
 flags = Namespace(
-    train_file='data/pg7838.txt',
+    train_folder='data',
     seq_size=32,
     batch_size=16,
     embedding_size=64,
     lstm_size=64,
     gradients_norm=5,
-    initial_words=['fame'],
+    initial_words=['day'],
     predict_top_k=5,
     checkpoint_path='checkpoint',
     n_epochs=200,
-    sent_length=100,
+    verse_length=100,
     train_print=100,
     predict_print=100,
-    line_length=8
+    line_length=8,
+    stanza_length=4
 )
 
 
-def get_data_from_file(train_file, batch_size, seq_size, words):
-    with open(train_file, 'r', encoding='utf-8') as f:
-        text = f.read()
-    begin = text.find('\n', text.find('*** START OF THIS PROJECT GUTENBERG EBOOK '))
-    end = text.find('*** END OF THIS PROJECT GUTENBERG EBOOK')
-    text = text[begin + 1:end].strip()
+def get_data_from_file(train_folder, batch_size, seq_size, words, topic_words):
+    text = ''
+    train_files = os.listdir(train_folder)
+    for train_file in train_files:
+        with open(os.path.join(train_folder, train_file), 'r', encoding='utf-8') as file:
+            train_text = file.read()
+            begin = train_text.find('\n', train_text.find('*** START OF THIS PROJECT GUTENBERG EBOOK '))
+            end = train_text.find('*** END OF THIS PROJECT GUTENBERG EBOOK')
+            train_text = train_text[begin + 1:end].strip()
+            text += train_text
     if words:
         text = text.lower()
-    text = re.split(r'\W+', text)
-    print('!! text=', text[:10])
+    sentences = re.split(r'[^\w ]', text)
+    text = []
+    count = 0
+    rhymes = []
+    for topic_word in topic_words:
+        rhymes.extend(pronouncing.rhymes(topic_word))
+    topic_words = topic_words.copy()
+    topic_words.extend(rhymes)
+    print('!! topic_words=', topic_words)
+    for sentence in sentences:
+        tokens = re.split(r'\W+', sentence)
+        if any([token in topic_words for token in tokens]):
+            count += 1
+            text.extend(tokens)
+    print('!! count=', count)
 
     word_counts = Counter(text)
 
@@ -79,7 +99,6 @@ def get_data_from_file(train_file, batch_size, seq_size, words):
 
 def get_batches(in_text, out_text, batch_size, seq_size):
     num_batches = np.prod(in_text.shape) // (seq_size * batch_size)
-    print('num_batches=', num_batches)
     for i in range(0, num_batches * seq_size, seq_size):
         yield in_text[:, i:i+seq_size], out_text[:, i:i+seq_size]
 
@@ -117,6 +136,34 @@ def get_loss_and_train_op(net, lr=0.001):
     return criterion, optimizer
 
 
+def _print_line(
+        words: List[str],
+        index: int,
+        line_number: int
+):
+    if line_number % flags.stanza_length == 0:
+        print()
+    print(words[index][0].upper() + (words[index][1:] if len(words[index]) > 1 else ''), end=' ')
+    print(' '.join(words[index + 1:index + flags.line_length]))
+
+
+def _choose_word(
+        output,
+        top_k,
+        words,
+        int_to_vocab
+) -> int:
+    _, top_ix = torch.topk(output[0], k=top_k)
+    choices = top_ix.tolist()
+    choice = np.random.choice(choices[0])
+
+    word = int_to_vocab[choice]
+    if word == 'i':
+        word = 'I'
+    words.append(word)
+    return choice
+
+
 def predict(device, net, words, n_vocab, vocab_to_int, int_to_vocab, top_k=10):
     net.eval()
     words = words.copy()
@@ -128,23 +175,21 @@ def predict(device, net, words, n_vocab, vocab_to_int, int_to_vocab, top_k=10):
         ix = torch.tensor([[vocab_to_int[w]]]).long().to(device)
         output, (state_h, state_c) = net(ix, (state_h, state_c))
 
-    _, top_ix = torch.topk(output[0], k=top_k)
-    choices = top_ix.tolist()
-    choice = np.random.choice(choices[0])
+    choice = _choose_word(output, top_k, words, int_to_vocab)
 
-    words.append(int_to_vocab[choice])
-
-    for index in range(flags.sent_length):
+    for index in range(flags.verse_length):
         ix = torch.tensor([[choice]]).long().to(device)
         output, (state_h, state_c) = net(ix, (state_h, state_c))
 
-        _, top_ix = torch.topk(output[0], k=top_k)
-        choices = top_ix.tolist()[0]
-        choice = np.random.choice(choices)
-        words.append(int_to_vocab[choice])
+        choice = _choose_word(output, top_k, words, int_to_vocab)
 
+    line_number = 0
     for index in range(0, len(words), flags.line_length):
-        print(' '.join(words[index:index + flags.line_length]))
+        _print_line(words, index, line_number)
+        line_number += 1
+        if np.random.randint(10) == 1:
+            _print_line(words, index, line_number)
+            line_number += 1
 
 
 def main():
@@ -153,10 +198,10 @@ def main():
     if words:
         flags.lstm_size = flags.embedding_size = words.vectors.shape[1]
     int_to_vocab, vocab_to_int, n_vocab, in_text, out_text = get_data_from_file(
-        flags.train_file, flags.batch_size, flags.seq_size, words)
+        flags.train_folder, flags.batch_size, flags.seq_size, words, flags.initial_words)
 
-    net = RNNModule(n_vocab, flags.seq_size,
-                    flags.embedding_size, flags.lstm_size, words.vectors if words else None)
+    net = RNNModule(
+        n_vocab, flags.seq_size, flags.embedding_size, flags.lstm_size, words.vectors if words else None)
     net = net.to(device)
 
     criterion, optimizer = get_loss_and_train_op(net, 0.01)
@@ -198,8 +243,9 @@ def main():
                       'Loss: {}'.format(loss_value))
 
             if iteration % flags.predict_print == 0:
-                predict(device, net, flags.initial_words, n_vocab,
-                        vocab_to_int, int_to_vocab)
+                predict(
+                    device, net, flags.initial_words, n_vocab,
+                    vocab_to_int, int_to_vocab)
                 torch.save(net.state_dict(),
                            'checkpoint_pt/model-{}.pth'.format(iteration))
 
