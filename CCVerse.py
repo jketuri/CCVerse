@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[43]:
+# In[ ]:
 
 
 from argparse import Namespace
@@ -12,6 +12,7 @@ from typing import Dict, List
 
 import numpy as np
 
+import language_check
 import pronouncing
 import torch
 import torch.nn as nn
@@ -26,10 +27,10 @@ flags = Namespace(
     embedding_size=64,
     lstm_size=64,
     gradients_norm=5,
-    initial_words=['day'],
+    initial_words=['love'],
     predict_top_k=5,
     checkpoint_path='checkpoint',
-    n_epochs=200,
+    n_epochs=150,
     verse_length=100,
     train_print=100,
     predict_print=100,
@@ -55,16 +56,23 @@ def get_data_from_file(train_folder, batch_size, seq_size, words, topic_words):
     count = 0
     rhymes = []
     for topic_word in topic_words:
-        rhymes.extend(pronouncing.rhymes(topic_word))
-    topic_words = topic_words.copy()
-    topic_words.extend(rhymes)
-    print('!! topic_words=', topic_words)
+        rhymes_for_topic_word = pronouncing.rhymes(topic_word)
+        rhyme_set = set()
+        for rhyme in rhymes_for_topic_word:
+            if rhyme in words.token_to_index and rhyme not in rhyme_set:
+                rhymes.append(rhyme)
+                rhyme_set.add(rhyme)
+    print('!! rhymes=', rhymes)
     for sentence in sentences:
         tokens = re.split(r'\W+', sentence)
-        if any([token in topic_words for token in tokens]):
-            count += 1
+        has_rhyme = any([rhyme in tokens for rhyme in rhymes])
+        if any([topic_word in tokens for topic_word in topic_words]):
             text.extend(tokens)
-    print('!! count=', count)
+            if not has_rhyme:
+                text.append(np.random.choice(rhymes))
+        elif has_rhyme:
+            text.extend(topic_words)
+            text.extend(tokens)
 
     word_counts = Counter(text)
 
@@ -164,7 +172,7 @@ def _choose_word(
     return choice
 
 
-def predict(device, net, words, n_vocab, vocab_to_int, int_to_vocab, top_k=10):
+def predict(tool, device, net, words, n_vocab, vocab_to_int, int_to_vocab, top_k=5):
     net.eval()
     words = words.copy()
 
@@ -183,6 +191,11 @@ def predict(device, net, words, n_vocab, vocab_to_int, int_to_vocab, top_k=10):
 
         choice = _choose_word(output, top_k, words, int_to_vocab)
 
+    verse = ' '.join(words)
+    matches = tool.check(verse)
+    print('!! check=', len(matches))
+    verse = language_check.correct(verse, matches)
+    words = verse.split()
     line_number = 0
     for index in range(0, len(words), flags.line_length):
         _print_line(words, index, line_number)
@@ -205,6 +218,8 @@ def main():
     net = net.to(device)
 
     criterion, optimizer = get_loss_and_train_op(net, 0.01)
+
+    tool = language_check.LanguageTool('en-US')
 
     iteration = 0
 
@@ -244,7 +259,7 @@ def main():
 
             if iteration % flags.predict_print == 0:
                 predict(
-                    device, net, flags.initial_words, n_vocab,
+                    tool, device, net, flags.initial_words, n_vocab,
                     vocab_to_int, int_to_vocab)
                 torch.save(net.state_dict(),
                            'checkpoint_pt/model-{}.pth'.format(iteration))
@@ -252,6 +267,12 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# In[ ]:
+
+
+
 
 
 # In[ ]:
