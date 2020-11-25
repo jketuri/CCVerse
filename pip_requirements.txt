@@ -1,3 +1,5 @@
+language-check
 numpy
 pronouncing
 pytorch-nlp
+scikit-learn
