@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[46]:
+# In[ ]:
 
 
 from argparse import Namespace
@@ -33,7 +33,7 @@ flags = Namespace(
 #    initial_words=['dream', 'love'],
     predict_top_k=5,
     checkpoint_path='checkpoint',
-    n_epochs=150,
+    n_epochs=200,
     verse_length=1000,
     train_print=100,
     predict_print=100,
@@ -124,7 +124,8 @@ def get_data_from_files(
         rhymes_for_theme_word = pronouncing.rhymes(theme_word)
         rhymes_for_theme_word = [rhyme for rhyme in rhymes_for_theme_word if rhyme in words.token_to_index]
         rhymes[theme_word] = rhymes_for_theme_word
-        
+    print('!! rhymes=', rhymes)
+
     text_tokens = []
     sentences = re.split(sentence_pattern, text)
     for sentence in sentences:
@@ -267,9 +268,23 @@ def predict(
         if not sentence:
             continue
         tokens = re.split(token_pattern, sentence)
-        if any([token in initial_words for token in tokens]) and any([token in theme_words for token in tokens]) and                 any([token in rhymes[theme_word] and token != theme_word for token in tokens for theme_word in theme_words if theme_word in tokens]):
+        rhyming = [
+            token if token in rhymes[theme_word] and token != theme_word else None
+            for token in tokens for theme_word in theme_words if theme_word in tokens]
+        if any(
+                [token in initial_words for token in tokens]) and any([token in theme_words for token in tokens]) and \
+                len(list(filter(lambda token: token is not None, rhyming))) > 1:
             matches = tool.check(sentence)
-            sentence1 = language_check.correct(sentence, matches)
+            sentence1 = language_check.correct(sentence, matches).strip()
+            if not sentence1:
+                continue
+            index = 0
+            for rhyme in rhyming:
+                if rhyme is not None:
+                    result = re.search(r'\W' + rhyme + r'\W', sentence1[index:])
+                    if result and result.end() < len(sentence1) - index:
+                        sentence1 = sentence1[:index + result.end()] + '\n' + sentence1[index + result.end():]
+                        index += result.end() + 1
             print(sentence1)
             if np.random.randint(10) == 1:
                 print(sentence1)
@@ -284,7 +299,6 @@ def main():
         flags.lstm_size = flags.embedding_size = words.vectors.shape[1]
     int_to_vocab, vocab_to_int, n_vocab, in_text, out_text, theme_words, rhymes = get_data_from_files(
         tool, flags.train_folder, flags.batch_size, flags.seq_size, words, flags.initial_words)
-    print('!! rhymes=', rhymes)
 
     net = RNNModule(
         n_vocab, flags.seq_size, flags.embedding_size, flags.lstm_size, words.vectors if words else None)
