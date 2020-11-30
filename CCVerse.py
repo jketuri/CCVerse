@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[2]:
 
 
 from argparse import Namespace
@@ -278,16 +278,22 @@ def predict(
             sentence1 = language_check.correct(sentence, matches).strip()
             if not sentence1:
                 continue
-            index = 0
-            for rhyme in rhyming:
-                if rhyme is not None:
-                    result = re.search(r'\W' + rhyme + r'\W', sentence1[index:])
-                    if result and result.end() < len(sentence1) - index:
-                        sentence1 = sentence1[:index + result.end()] + '\n' + sentence1[index + result.end():]
-                        index += result.end() + 1
+            while True:
+                found = False
+                for rhyme in rhyming:
+                    if rhyme is not None:
+                        index = sentence1.find(' ' + rhyme + ' ')
+                        if index != -1:
+                            sentence1 = sentence1[:index + len(' ' + rhyme)] + '\n' + sentence1[index + len(' ' + rhyme + ' '):]
+                            found = True
+                for theme_word in theme_words:
+                    index = sentence1.find(' ' + theme_word + ' ')
+                    if index != -1:
+                        sentence1 = sentence1[:index + len(' ' + theme_word)] + '\n' + sentence1[index + len(' ' + theme_word + ' '):]
+                        found = True
+                if not found:
+                    break
             print(sentence1)
-            if np.random.randint(10) == 1:
-                print(sentence1)
 
 
 def main():
