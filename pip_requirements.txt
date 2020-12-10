@@ -3,3 +3,4 @@ numpy
 pronouncing
 pytorch-nlp
 scikit-learn
+textsplit

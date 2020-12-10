@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[1]:
 
 
 from argparse import Namespace
@@ -10,16 +10,17 @@ import os
 import re
 import time
 from typing import Dict, List, Set
-
 import numpy as np
-
+import pandas as pd
 import language_check
 import pronouncing
 from sklearn.cluster import KMeans
+from sklearn.feature_extraction.text import CountVectorizer
+from textsplit.algorithm import split_optimal, split_greedy, get_total
+from textsplit.tools import SimpleSentenceTokenizer, get_penalty, get_segments
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torchnlp.word_to_vector import BPEmb, FastText
 
 flags = Namespace(
@@ -30,13 +31,12 @@ flags = Namespace(
     lstm_size=64,
     gradients_norm=5,
     initial_words=['dream', 'light'],
-#    initial_words=['dream', 'love'],
     predict_top_k=5,
     checkpoint_path='checkpoint',
     n_epochs=200,
     verse_length=1000,
     train_print=100,
-    predict_print=100,
+    predict_print=1,
     line_length=8,
     stanza_length=4
 )
@@ -45,27 +45,44 @@ sentence_pattern = r'[,;\.\?!:]'
 token_pattern = r'[^-\w\']+'
 
 
+def _segment_topics(
+        text: str,
+        wrdvecs: pd.DataFrame
+) -> int:
+    sentence_tokenizer = SimpleSentenceTokenizer()
+    sentenced_text = sentence_tokenizer(text)
+    vecr = CountVectorizer(vocabulary=wrdvecs.index)
+    sentence_vectors = vecr.transform(sentenced_text).dot(wrdvecs)
+    segment_len = 1
+    penalty = get_penalty([sentence_vectors], segment_len)
+    print('penalty %4.2f' % penalty)
+    optimal_segmentation = split_optimal(sentence_vectors, penalty, seg_limit=250)
+    segmented_text = get_segments(sentenced_text, optimal_segmentation)
+    print('%d sentences, %d segments, avg %4.2f sentences per segment' % (
+        len(sentenced_text), len(segmented_text), len(sentenced_text) / len(segmented_text)))
+    return len(segmented_text)
+
+    
 def _update_words(
         text_tokens: List[str],
-        words: FastText
-):
+        embeddings: FastText
+) -> (List[str], Dict[str, int], int):
     word_counts = Counter(text_tokens)
 
-    if words:
-        missing_words = {word for word in word_counts if word.lower() not in words.token_to_index}
-        print('!! missing words=', len(missing_words))
-        for word in missing_words:
-            del word_counts[word]
+    missing_words = {word for word in word_counts if word.lower() not in embeddings.token_to_index}
+    print('!! missing words=', len(missing_words))
+    for word in missing_words:
+        del word_counts[word]
 
     sorted_vocab = sorted(word_counts, key=word_counts.get, reverse=True)
     int_to_vocab = {k: w for k, w in enumerate(sorted_vocab)}
     vocab_to_int = {w: k for k, w in int_to_vocab.items()}
     n_vocab = len(int_to_vocab)
     
-    if words:
-        words.vectors = torch.index_select(words.vectors, 0, torch.tensor([words.token_to_index[word.lower()] for word in sorted_vocab]))
-        words.index_to_token = sorted_vocab
-        words.token_to_index = vocab_to_int
+    embeddings.vectors = torch.index_select(
+        embeddings.vectors, 0, torch.tensor([embeddings.token_to_index[word.lower()] for word in sorted_vocab]))
+    embeddings.index_to_token = sorted_vocab
+    embeddings.token_to_index = vocab_to_int
     return int_to_vocab, vocab_to_int, n_vocab
 
 
@@ -81,9 +98,9 @@ def get_data_from_files(
         train_folder: str,
         batch_size: int,
         seq_size: int,
-        words: FastText,
+        embeddings: FastText,
         topic_words: List[str]
-):
+) -> (List[str], Dict[str, int], int, np.ndarray, np.ndarray, Set[str], Dict[str, str]):
     text = ''
     train_files = os.listdir(train_folder)
     for train_file in train_files:
@@ -103,18 +120,18 @@ def get_data_from_files(
         text_tokens.extend(tokens)
         text_tokens.append('.')
 
-    int_to_vocab, vocab_to_int, n_vocab = _update_words(text_tokens, words)
+    int_to_vocab, vocab_to_int, n_vocab = _update_words(text_tokens, embeddings)
     print('Vocabulary size', n_vocab)
     print('!! topic_words=', topic_words)
 
-    clusters = KMeans(n_clusters=int(n_vocab / 100)).fit_predict(X=words.vectors)
+    clusters = KMeans(n_clusters=int(n_vocab / 100)).fit_predict(X=embeddings.vectors)
     print("number of estimated clusters : %d" % len(np.unique(clusters)))
     theme_words = set()
     for topic_word in topic_words:
-        cluster = clusters[words.token_to_index[topic_word]]
+        cluster = clusters[embeddings.token_to_index[topic_word]]
         for cluster_idx in range(len(clusters)):
             if clusters[cluster_idx] == cluster:
-                theme_words.add(words.index_to_token[cluster_idx])
+                theme_words.add(embeddings.index_to_token[cluster_idx])
     theme_words.update(topic_words)
     print('!! theme_words=', theme_words)
     print('!! number of theme_words=', len(theme_words))
@@ -122,7 +139,7 @@ def get_data_from_files(
     rhymes = {}
     for theme_word in theme_words:
         rhymes_for_theme_word = pronouncing.rhymes(theme_word)
-        rhymes_for_theme_word = [rhyme for rhyme in rhymes_for_theme_word if rhyme in words.token_to_index]
+        rhymes_for_theme_word = [rhyme for rhyme in rhymes_for_theme_word if rhyme in embeddings.token_to_index]
         rhymes[theme_word] = rhymes_for_theme_word
     print('!! rhymes=', rhymes)
 
@@ -137,7 +154,7 @@ def get_data_from_files(
             text_tokens.extend(tokens)
             text_tokens.append('.')
 
-    int_to_vocab, vocab_to_int, n_vocab = _update_words(text_tokens, words)
+    int_to_vocab, vocab_to_int, n_vocab = _update_words(text_tokens, embeddings)
     print('Vocabulary size', n_vocab)
 
     int_text = [vocab_to_int[w] for w in text_tokens if w in vocab_to_int]
@@ -177,10 +194,7 @@ class RNNModule(
         super(RNNModule, self).__init__()
         self.seq_size = seq_size
         self.lstm_size = lstm_size
-        if pretrained_embeddings is not None:
-            self.embedding = nn.Embedding.from_pretrained(pretrained_embeddings)
-        else:
-            self.embedding = nn.Embedding(n_vocab, embedding_size)
+        self.embedding = nn.Embedding.from_pretrained(pretrained_embeddings)
         self.lstm = nn.LSTM(embedding_size,
                             lstm_size,
                             batch_first=True)
@@ -194,7 +208,6 @@ class RNNModule(
         embed = self.embedding(x)
         output, state = self.lstm(embed, prev_state)
         logits = self.dense(output)
-
         return logits, state
 
     def zero_state(
@@ -217,30 +230,30 @@ def get_loss_and_train_op(
 
 def _choose_word(
         output,
-        top_k,
-        words,
-        int_to_vocab
+        top_k: int,
+        words: List[str],
+        int_to_vocab: List[str]
 ) -> int:
     _, top_ix = torch.topk(output[0], k=top_k)
     choices = top_ix.tolist()
     choice = np.random.choice(choices[0])
-
     word = int_to_vocab[choice]
     words.append(word)
     return choice
 
 
 def predict(
-        tool,
-        device,
-        net,
-        initial_words,
-        n_vocab,
-        vocab_to_int,
-        int_to_vocab,
+        tool: language_check.LanguageTool,
+        device: torch.device,
+        net: RNNModule,
+        initial_words: List[str],
+        n_vocab: int,
+        vocab_to_int: Dict[str, int],
+        int_to_vocab: List[str],
         theme_words: Set[str],
-        rhymes: Set[str],
-        top_k=5
+        rhymes: Dict[str, str],
+        wrdvecs: pd.DataFrame,
+        top_k: int=5
 ):
     net.eval()
     words = initial_words.copy()
@@ -261,8 +274,10 @@ def predict(
         if len(words) > flags.verse_length and words[-1] == '.':
             break
 
+    text = ''
     verse = ' '.join(words)
     sentences = re.split(sentence_pattern, verse)
+    n_sentences = 0
     for sentence in sentences:
         sentence = sentence.strip()
         if not sentence:
@@ -293,21 +308,24 @@ def predict(
                         found = True
                 if not found:
                     break
-            print(sentence1)
+            text += sentence1 + '.\n'
+            n_sentences += 1
+    if n_sentences > 1 and _segment_topics(text, wrdvecs) == 1:
+        print(text)
 
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    words = FastText(language='en')
+    embeddings = FastText(language='en')
     tool = language_check.LanguageTool('en-US')
 
-    if words:
-        flags.lstm_size = flags.embedding_size = words.vectors.shape[1]
+    flags.lstm_size = flags.embedding_size = embeddings.vectors.shape[1]
     int_to_vocab, vocab_to_int, n_vocab, in_text, out_text, theme_words, rhymes = get_data_from_files(
-        tool, flags.train_folder, flags.batch_size, flags.seq_size, words, flags.initial_words)
+        tool, flags.train_folder, flags.batch_size, flags.seq_size, embeddings, flags.initial_words)
+    wrdvecs = pd.DataFrame(embeddings.vectors.numpy(), index=embeddings.index_to_token)
 
     net = RNNModule(
-        n_vocab, flags.seq_size, flags.embedding_size, flags.lstm_size, words.vectors if words else None)
+        n_vocab, flags.seq_size, flags.embedding_size, flags.lstm_size, embeddings.vectors)
     net = net.to(device)
 
     criterion, optimizer = get_loss_and_train_op(net, 0.01)
@@ -348,10 +366,10 @@ def main():
                       'Iteration: {}'.format(iteration),
                       'Loss: {}'.format(loss_value))
 
-            if iteration % flags.predict_print == 0:
+            if iteration % flags.predict_print == 0 and loss_value < 1.0:
                 predict(
                     tool, device, net, flags.initial_words, n_vocab,
-                    vocab_to_int, int_to_vocab, theme_words, rhymes)
+                    vocab_to_int, int_to_vocab, theme_words, rhymes, wrdvecs)
                 torch.save(net.state_dict(),
                            'checkpoint_pt/model-{}.pth'.format(iteration))
 
