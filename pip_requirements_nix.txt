@@ -5,3 +5,4 @@ pronouncing
 pytorch-nlp
 scikit-learn
 textsplit
+torch

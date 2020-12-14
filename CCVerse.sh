@@ -1,1 +1,1 @@
-python CCVerse.py $@
+python3 CCVerse.py $@
