@@ -1,0 +1,1 @@
+python CCVerse.py %*

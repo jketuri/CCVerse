@@ -8,6 +8,7 @@ from argparse import Namespace
 from collections import Counter
 import os
 import re
+from sys import argv
 import time
 from typing import Dict, List, Set
 import numpy as np
@@ -253,7 +254,7 @@ def predict(
         rhymes: Dict[str, str],
         wrdvecs: pd.DataFrame,
         top_k: int=5
-):
+) -> bool:
     net.eval()
     words = initial_words.copy()
 
@@ -308,10 +309,18 @@ def predict(
             text += sentence1 + '.\n'
             n_sentences += 1
     if n_sentences > 1 and _segment_topics(text, wrdvecs) == 1:
+        with open('output.txt', 'at') as file:
+            file.write(text + '\n')
         print(text)
+        return True
+    return False
 
 
 def main():
+    if len(argv) > 1:
+        flags.initial_words = argv[1:]
+    with open('output.txt', 'wt'):
+        pass
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     embeddings = FastText(language='en')
     tool = language_check.LanguageTool('en-US')
@@ -358,16 +367,17 @@ def main():
 
             optimizer.step()
 
-            do_predict = (iteration % flags.predict_print) == 0 and loss_value < 0.7
-            if do_predict or (iteration % flags.train_print) == 0:
+            printed = False
+            if (iteration % flags.predict_print) == 0 and loss_value < 0.7:
+                printed = predict(
+                    tool, device, net, flags.initial_words, n_vocab,
+                    vocab_to_int, int_to_vocab, theme_words, rhymes, wrdvecs)
+
+            if printed or (iteration % flags.train_print) == 0:
                 print('Epoch: {}/{}'.format(e + 1, flags.n_epochs),
                       'Iteration: {}'.format(iteration),
                       'Loss: {}'.format(loss_value))
 
-            if do_predict:
-                predict(
-                    tool, device, net, flags.initial_words, n_vocab,
-                    vocab_to_int, int_to_vocab, theme_words, rhymes, wrdvecs)
 
 if __name__ == '__main__':
     main()
