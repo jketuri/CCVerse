@@ -9,6 +9,8 @@ Run setup.cmd in Anaconda Prompt as Administrator.
 In \*nix, run
 setup.sh
 
+Use Python 3.8 or newer.
+
 This application uses as a base model an example from:
 
 https://machinetalk.org/2019/02/08/text-generation-with-pytorch/
