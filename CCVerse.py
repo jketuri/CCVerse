@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[3]:
+# In[ ]:
 
 
 from argparse import Namespace
@@ -13,7 +13,6 @@ import time
 from typing import Dict, List, Set
 import numpy as np
 import pandas as pd
-import language_check
 import pronouncing
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import CountVectorizer
@@ -94,7 +93,6 @@ def _get_tokens(
     return tokens
 
 def get_data_from_files(
-        tool,
         train_folder: str,
         batch_size: int,
         seq_size: int,
@@ -243,7 +241,6 @@ def _choose_word(
 
 
 def predict(
-        tool: language_check.LanguageTool,
         device: torch.device,
         net: RNNModule,
         initial_words: List[str],
@@ -287,8 +284,7 @@ def predict(
             token if token in rhymes[theme_word] and token != theme_word else None
             for token in tokens for theme_word in theme_words if theme_word in tokens]
         if any([token in theme_words for token in tokens]) and                 len(list(filter(lambda token: token is not None, rhyming))) > 2:
-            matches = tool.check(sentence)
-            sentence1 = language_check.correct(sentence, matches).strip()
+            sentence1 = sentence.strip()
             if not sentence1:
                 continue
             while True:
@@ -317,17 +313,16 @@ def predict(
 
 
 def main():
-    if len(argv) > 1:
+    if len(argv) > 1 and argv[1] != '-f':
         flags.initial_words = argv[1:]
     with open('output.txt', 'wt'):
         pass
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     embeddings = FastText(language='en')
-    tool = language_check.LanguageTool('en-US')
 
     flags.lstm_size = flags.embedding_size = embeddings.vectors.shape[1]
     int_to_vocab, vocab_to_int, n_vocab, in_text, out_text, theme_words, rhymes = get_data_from_files(
-        tool, flags.train_folder, flags.batch_size, flags.seq_size, embeddings, flags.initial_words)
+        flags.train_folder, flags.batch_size, flags.seq_size, embeddings, flags.initial_words)
     wrdvecs = pd.DataFrame(embeddings.vectors.numpy(), index=embeddings.index_to_token)
 
     net = RNNModule(
@@ -368,9 +363,9 @@ def main():
             optimizer.step()
 
             printed = False
-            if (iteration % flags.predict_print) == 0 and loss_value < 0.7:
+            if (iteration % flags.predict_print) == 0 and loss_value < 1.0:
                 printed = predict(
-                    tool, device, net, flags.initial_words, n_vocab,
+                    device, net, flags.initial_words, n_vocab,
                     vocab_to_int, int_to_vocab, theme_words, rhymes, wrdvecs)
 
             if printed or (iteration % flags.train_print) == 0:
