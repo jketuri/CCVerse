@@ -30,5 +30,5 @@ CCVerse night sorrow
 The application will download at the first time about 6gb word embeddings.
 It will do this only once if directory .word_vectors_cache is not deleted.
 Then the application will train 200 epochs and will output text at the same time
-when loss is less than 0.7 and other conditions are met.
+when loss is less than 1.0 and other conditions are met.
 Output is also saved to the file output.txt.
