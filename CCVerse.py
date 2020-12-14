@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[3]:
 
 
 from argparse import Namespace
@@ -42,7 +42,7 @@ flags = Namespace(
 )
 
 sentence_pattern = r'[,;\.\?!:]'
-token_pattern = r'[^-\w\']+'
+token_pattern = r'[^-\w\'´`]+'
 
 
 def _segment_topics(
@@ -53,8 +53,7 @@ def _segment_topics(
     sentenced_text = sentence_tokenizer(text)
     vecr = CountVectorizer(vocabulary=wrdvecs.index)
     sentence_vectors = vecr.transform(sentenced_text).dot(wrdvecs)
-    segment_len = 1
-    penalty = get_penalty([sentence_vectors], segment_len)
+    penalty = get_penalty([sentence_vectors], segment_len=1)
     print('penalty %4.2f' % penalty)
     optimal_segmentation = split_optimal(sentence_vectors, penalty, seg_limit=250)
     segmented_text = get_segments(sentenced_text, optimal_segmentation)
@@ -89,7 +88,7 @@ def _update_words(
 def _get_tokens(
         sentence: str
 ) -> List[str]:
-    tokens = [re.sub(r'-+', '-', token.strip('_-"')) for token in re.split(token_pattern, sentence)]
+    tokens = [re.sub(r'-+', '-', token.strip('_-"\'´`')) for token in re.split(token_pattern, sentence)]
     tokens = [token.lower() if token != 'I' else token for token in tokens if token]
     return tokens
 
@@ -286,9 +285,7 @@ def predict(
         rhyming = [
             token if token in rhymes[theme_word] and token != theme_word else None
             for token in tokens for theme_word in theme_words if theme_word in tokens]
-        if any(
-                [token in initial_words for token in tokens]) and any([token in theme_words for token in tokens]) and \
-                len(list(filter(lambda token: token is not None, rhyming))) > 1:
+        if any([token in theme_words for token in tokens]) and                 len(list(filter(lambda token: token is not None, rhyming))) > 2:
             matches = tool.check(sentence)
             sentence1 = language_check.correct(sentence, matches).strip()
             if not sentence1:
@@ -361,18 +358,16 @@ def main():
 
             optimizer.step()
 
-            if iteration % flags.train_print == 0:
+            do_predict = (iteration % flags.predict_print) == 0 and loss_value < 0.7
+            if do_predict or (iteration % flags.train_print) == 0:
                 print('Epoch: {}/{}'.format(e + 1, flags.n_epochs),
                       'Iteration: {}'.format(iteration),
                       'Loss: {}'.format(loss_value))
 
-            if iteration % flags.predict_print == 0 and loss_value < 1.0:
+            if do_predict:
                 predict(
                     tool, device, net, flags.initial_words, n_vocab,
                     vocab_to_int, int_to_vocab, theme_words, rhymes, wrdvecs)
-                torch.save(net.state_dict(),
-                           'checkpoint_pt/model-{}.pth'.format(iteration))
-
 
 if __name__ == '__main__':
     main()
