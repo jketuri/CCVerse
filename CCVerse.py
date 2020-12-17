@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[3]:
 
 
 from argparse import Namespace
@@ -33,7 +33,7 @@ flags = Namespace(
     initial_words=['dream', 'light'],
     predict_top_k=5,
     checkpoint_path='checkpoint',
-    n_epochs=200,
+    n_epochs=400,
     verse_length=1000,
     train_print=100,
     predict_print=1,
@@ -89,7 +89,7 @@ def _get_tokens(
         sentence: str
 ) -> List[str]:
     tokens = [re.sub(r'-+', '-', token.strip('_-"\'´`')) for token in re.split(token_pattern, sentence)]
-    tokens = [token.lower() if token != 'I' else token for token in tokens if token]
+    tokens = [token.lower() if token != 'I' else token for token in tokens if token != 's']
     return tokens
 
 def get_data_from_files(
@@ -302,7 +302,7 @@ def predict(
                         found = True
                 if not found:
                     break
-            text += sentence1 + '.\n'
+            text += sentence1.capitalize() + '.\n'
             n_sentences += 1
     if n_sentences > 1 and _segment_topics(text, wrdvecs) == 1:
         with open('output.txt', 'at') as file:
