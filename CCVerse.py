@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[3]:
+# In[8]:
 
 
 from argparse import Namespace
@@ -88,9 +88,7 @@ def _update_words(
 def _get_tokens(
         sentence: str
 ) -> List[str]:
-    tokens = [re.sub(r'-+', '-', token.strip('_-"\'´`')) for token in re.split(token_pattern, sentence)]
-    tokens = [token.lower() if token != 'I' else token for token in tokens if token != 's']
-    return tokens
+    return [re.sub(r'-+', '-', token.strip('_-"\'´`').lower()) for token in re.split(token_pattern, sentence) if token != 's']
 
 def get_data_from_files(
         train_folder: str,
@@ -129,7 +127,7 @@ def get_data_from_files(
         cluster = clusters[embeddings.token_to_index[topic_word]]
         for cluster_idx in range(len(clusters)):
             if clusters[cluster_idx] == cluster:
-                theme_words.add(embeddings.index_to_token[cluster_idx])
+                theme_words.add(embeddings.index_to_token[cluster_idx].lower())
     theme_words.update(topic_words)
     print('!! theme_words=', theme_words)
     print('!! number of theme_words=', len(theme_words))
@@ -236,7 +234,7 @@ def _choose_word(
     choices = top_ix.tolist()
     choice = np.random.choice(choices[0])
     word = int_to_vocab[choice]
-    words.append(word)
+    words.append('I' if word == 'i' else word)
     return choice
 
 
@@ -284,7 +282,7 @@ def predict(
             token if token in rhymes[theme_word] and token != theme_word else None
             for token in tokens for theme_word in theme_words if theme_word in tokens]
         if any([token in theme_words for token in tokens]) and                 len(list(filter(lambda token: token is not None, rhyming))) > 2:
-            sentence1 = sentence.strip()
+            sentence1 = ' '.join(tokens)
             if not sentence1:
                 continue
             while True:
@@ -302,7 +300,7 @@ def predict(
                         found = True
                 if not found:
                     break
-            text += sentence1.capitalize() + '.\n'
+            text += sentence1[0].upper() + sentence1[1:] + '.\n'
             n_sentences += 1
     if n_sentences > 1 and _segment_topics(text, wrdvecs) == 1:
         with open('output.txt', 'at') as file:
@@ -363,7 +361,7 @@ def main():
             optimizer.step()
 
             printed = False
-            if (iteration % flags.predict_print) == 0 and loss_value < 1.0:
+            if (iteration % flags.predict_print) == 0 and loss_value < 0.7:
                 printed = predict(
                     device, net, flags.initial_words, n_vocab,
                     vocab_to_int, int_to_vocab, theme_words, rhymes, wrdvecs)
